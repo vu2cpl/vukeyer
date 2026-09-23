@@ -2039,14 +2039,23 @@ makes the keyer feel slow.
     16 MB flash (Boya, 0x68 / 0x4018), flash eFuse **quad**, **8 MB embedded
     octal PSRAM (AP_3v3)**, 40 MHz crystal, **MAC `ac:27:6e:a5:92:4c`**.
     The shield reads ESP32-S3-N16R8. N16R8 as advertised.
-  - **Two USB-C, one working.** The live port is the **native USB** — it
-    enumerates `303A:4001 "Espressif Device"` while the demo runs (USB-OTG /
-    TinyUSB) and `303A:1001 "USB JTAG_serial debug unit"` in ROM download
-    mode, because the S3's two USB peripherals share one connector and only
-    one is active at a time. The **second port neither powered the board
-    (RGB LED dark) nor enumerated anything**, despite having its own
-    USB-UART bridge (QFN beside the connector; header TX/RX = GPIO 43/44).
-    Unexplained — not yet chased past swapping the cable over.
+  - **Two USB-C, and BOTH cables must be plugged in.** One port is the
+    **native USB** — it enumerates `303A:4001 "Espressif Device"` while the
+    demo runs (USB-OTG / TinyUSB) and `303A:1001 "USB JTAG_serial debug
+    unit"` in ROM download mode, because the S3's two USB peripherals share
+    one connector and only one is active at a time. The other is a **CH343**
+    (`1A86:55D3 "USB Single Serial"`, header TX/RX = GPIO 43/44).
+    With only the CH343 cable in, **nothing happens at all** — RGB LED dark,
+    no enumeration — because the bridge is powered from the board's rail and
+    not from its own connector's VBUS. Manoj's call, and it was right: plug
+    **both** cables in and the CH343 appears. It then flashes with normal
+    **auto-reset**, no BOOT/RST needed.
+  - **The CH343's serial number is unique** — `5C37179441`, so its device
+    path is `/dev/cu.usbmodem5C371794411` and cannot be stolen by another
+    board. That is the CP2102 `usbserial-0001` identity problem solved in
+    hardware, independently of the native-USB descriptor work. It does not
+    solve the *reset* half: auto-reset works because DTR/RTS still drive
+    EN/IO0, so a logger opening this port would still reset the board.
   - **Photo** confirms the header pinout, the `RGB` and `IN-OUT` solder
     jumpers by the WS2812, and that every pin the new map uses is broken
     out. Board dimensions still unmeasured.
@@ -2227,9 +2236,9 @@ against exposing it beyond one.
     `bt.cpp` or USB host for the K220 dongle; first flash and bring-up on the
     S3; measuring the board for the enclosure (still modelled on the esp32dev
     55.3 × 28.3 with one USB-C cutout, and this board has two).
-    **The second USB-C did not power or enumerate** on first try even though
-    it has its own USB-UART bridge — chase the cable, the seating, then the
-    connector's solder before believing it is by design.
+    **Both USB-C cables must be plugged in** for the CH343 port to exist —
+    the bridge is board-powered. That port has a unique serial number and
+    flashes with auto-reset, so bench work can use it today.
     **OTRSP/SO2R is not planned for this box** and its pin reservation has
     been dropped — SO2R stays in `~/projects/SO2R box`.
 11. **RTTY FSK on GPIO27** (2026-09-11): Baudot/ITA2, 45.45 baud, 1.5 stop

@@ -36,9 +36,10 @@
 //                                         button; 46 is input-only
 //    GPIO 48      onboard WS2812 RGB      needs neopixelWrite(),
 //                                         digitalWrite does nothing
-//    GPIO 43, 44  U0TXD/U0RXD             wired to the on-board USB-UART
-//                                         bridge behind the second USB-C
-//                                         (header pins marked TX/RX)
+//    GPIO 43, 44  U0TXD/U0RXD             wired to the CH343 behind the
+//                                         second USB-C (header TX/RX) —
+//                                         that port needs BOTH cables in,
+//                                         the bridge is board-powered
 //
 //  ADC1 is GPIO 1-10 on this chip, so the pot has to live down
 //  there — it is not GPIO 34 as on the classic part, where 34 was

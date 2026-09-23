@@ -415,7 +415,10 @@ its own reset pin. Fixes, in order of preference:
    An S3 N16R8 board arrived on 2026-09-23 and the env is now configured for
    it, but **the firmware has not been flashed to it**, the custom USB
    descriptor is not written, and a logger opening its native USB port is
-   untested.
+   untested. Note that board's *other* port, a CH343, already carries a
+   **unique serial number** — so on that board the port-identity half of the
+   problem is gone even before the descriptor work, though its DTR/RTS still
+   drive EN and would still reset the board.
 
 ## Sharing the port with a logger
 
