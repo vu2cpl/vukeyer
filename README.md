@@ -45,6 +45,8 @@ only ~26 KB of heap — too little for WiFi, so the board drops off the
 network. A boot-time check now switches Bluetooth back off and restarts
 when free heap is under 60 KB, and the page says why. Realistic routes are
 an ESP32-S3 (lighter NimBLE stack) or a PSRAM board — see `HANDOVER.md`.
+An **S3 N16R8 board has been on the bench since 2026-09-23** (pin map and
+build environment done, nothing flashed to it yet).
 Classic-Bluetooth-only keyboards are not supported by the core either way.
 
 **Enclosure:** a two-part 3D-printable case with OLED window, pot, KEY LED,
@@ -157,6 +159,12 @@ debug console and why it exists.
 | KEY out 2 | 18 | radio 2 KEY, same drive as radio 1 |
 | PTT out 2 | 19 | radio 2 PTT |
 | FSK out | 27 | RTTY keying line, mark = idle (invertible) |
+
+The table above is the **classic ESP32 devkit**, which is the board in
+service. The ESP32-S3 build uses completely different numbers — none of
+32/33/34 exist on that chip — and `include/pins.h` picks the map by chip at
+compile time. The S3 map is in `HANDOVER.md` under "Pin maps"; nothing has
+been wired to an S3 yet.
 
 Paddles need no external parts.
 
@@ -404,8 +412,10 @@ its own reset pin. Fixes, in order of preference:
 2. **Give the logger a serial adapter with only TX/RX/GND wired** to the
    keyer, DTR/RTS unconnected. No soldering on the devkit, but a second lead.
 3. **Move to the ESP32-S3 env**, whose native USB has no DTR-driven reset.
-   The env builds (fixed 2026-09-13) but has not yet been run on an S3
-   board, and a logger opening its native USB port is untested.
+   An S3 N16R8 board arrived on 2026-09-23 and the env is now configured for
+   it, but **the firmware has not been flashed to it**, the custom USB
+   descriptor is not written, and a logger opening its native USB port is
+   untested.
 
 ## Sharing the port with a logger
 
@@ -1064,7 +1074,7 @@ radio, where no other machine can watch it.
 ```
 platformio.ini        env:esp32-vukeyer (esp32dev) + env:esp32s3-vukeyer
 include/config.h       broker, topics, ports, AP name (+ git-ignored secrets.h)
-include/pins.h         GPIO map (I²C + OTRSP pins reserved)
+include/pins.h         GPIO maps — classic ESP32 and ESP32-S3, picked by chip
 src/keyer.cpp          iambic keyer engine (1 kHz task, core 1)
 src/hostlink.cpp       K1EL WinKeyer protocol engine
 src/flex.cpp           FlexRadio discovery + SmartSDR command API

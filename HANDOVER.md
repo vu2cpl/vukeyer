@@ -1,13 +1,22 @@
 # VUKEYER — Project Handover
 *For continuation in a new Claude session*
 
-**Created:** 2026-08-26 · **Updated:** 2026-09-17 · **Type:** ESP firmware
-(esp32dev, S3 env reserved) · **Status:** working keyer, **public repo**
+**Created:** 2026-08-26 · **Updated:** 2026-09-23 · **Type:** ESP firmware
+(esp32dev in service; ESP32-S3 N16R8 on the bench since 2026-09-23) ·
+**Status:** working keyer, **public repo**
 (MIT). RUMlogNG drives it over USB and keys the Flex; OLED/LCD panel,
 speed pot, settings web page, memories, second radio and RTTY FSK all on
 hardware.
 
 **Read this first if you are picking the project up after 2026-09-12:**
+
+- **S3 BOARD ON THE BENCH 2026-09-23.** The first of the two ESP32-S3
+  N16R8 boards is here and verified: rev v0.2, 16 MB quad flash (Boya
+  0x68/0x4018), 8 MB octal PSRAM, MAC `ac:27:6e:a5:92:4c`. `include/pins.h`
+  now holds **two maps** chosen by `CONFIG_IDF_TARGET_ESP32S3`, and
+  `[env:esp32s3-vukeyer]` is configured for the real module (`qio_opi`,
+  16 MB, `BOARD_HAS_PSRAM`). Both envs build. **Nothing has been flashed to
+  the S3 and nothing is wired to it** — the keyer in service is untouched.
 
 - **RENAMED 2026-09-17 (22:20): ESP32 WinKeyer → VUKEYER.** WinKeyer is
   K1EL's product name, and the repo is public. What changed:
@@ -106,7 +115,8 @@ original.
 `esp32dev`) — dual core, WiFi + BT Classic. An **ESP32-S3** env
 (`env:esp32s3-vukeyer`) is the upgrade path: native USB CDC with a custom
 descriptor would fix the CP2102 `usbserial-0001` port-identity problem for
-wired use. A friend of Manoj's is building one too, on a 38-pin DevKitC
+wired use. **One S3 N16R8 board arrived and was verified on 2026-09-23** —
+see the S3 pin map below and the dated entry in What changed. A friend of Manoj's is building one too, on a 38-pin DevKitC
 clone — same chip family, same firmware, no changes needed.
 
 **Why WiFi is the primary link:** every CW element is timed on the keyer
@@ -115,7 +125,13 @@ status. Link latency never reaches the air. The one exception is
 real-time paddle keying over the network, which is deliberately not
 implemented — see "Flex backend" below.
 
-## Pin map (`include/pins.h`)
+## Pin maps (`include/pins.h`)
+
+`pins.h` includes `<sdkconfig.h>` itself and branches on
+`CONFIG_IDF_TARGET_ESP32S3`, so each board gets its own numbers and the
+header cannot be broken by include order.
+
+### Classic ESP32 devkit (`env:esp32-vukeyer`) — the board in service
 
 | Signal | GPIO | Notes |
 |---|---|---|
@@ -145,6 +161,32 @@ Earlier in the same session `pins.h` was also found carrying a *stale*
 reservation comment claiming 18/19/21/22/23, contradicting a 2026-09-10
 revision that had moved OTRSP off the I²C pins for the display. Both are
 now moot.
+
+### ESP32-S3 N16R8 (`env:esp32s3-vukeyer`) — port target, nothing wired yet
+
+Same signals, entirely different numbers. None of the classic pins survive
+the move: 32/33/34 do not exist on the S3, and its ADC1 is GPIO 1-10.
+
+| Signal | GPIO | Notes |
+|---|---|---|
+| Paddle dit (tip) | 5 | INPUT_PULLUP, closes to GND |
+| Paddle dah (ring) | 6 | INPUT_PULLUP, closes to GND |
+| Key out | 7 | active high → opto or NPN |
+| PTT out | 15 | active high → opto or NPN |
+| Sidetone | 16 | LEDC PWM → passive piezo |
+| Speed pot | 4 | ADC1_CH3 — S3 ADC1 is GPIO 1-10, not 32-39 |
+| Display SDA / SCL | 8 / 9 | Arduino core's default I²C pins for the S3 devkits |
+| Status LED | 17 | **external** LED + resistor; the on-board LED is a WS2812 on GPIO 48 that `digitalWrite()` cannot drive |
+| KEY / PTT out 2 | 18 / 21 | 19/20 are the native USB pins, hence the jump |
+| FSK out | 14 | RTTY keying line, mark = idle, invertible |
+
+Unusable on this module: **26-32** quad SPI flash, **33-37** octal PSRAM
+(35/36/37 are on the header and look free — they are not), **19/20** native
+USB, **0/3/45/46** strapping (0 is the BOOT button, 46 input-only), **48**
+the RGB LED. **43/44** are broken out as TX/RX but run to the on-board
+USB-UART bridge — the only console left once native USB becomes the
+WinKeyer port. Free and on the headers: 1, 2, 10, 11, 12, 13, 38, 47 and
+39-42.
 
 ## Architecture
 
@@ -1987,6 +2029,45 @@ makes the keyer feel slow.
     or RUMlogNG having lost the port mid-flash. **Workaround: close and
     reopen the port once after flashing.** Not investigated further.
 
+- **2026-09-23** — **ESP32-S3 N16R8 on the bench: identified, pin-mapped,
+  env fixed. Nothing flashed.** The first of the two boards ordered
+  2026-09-16 arrived.
+  - **Identification.** It shipped running a factory RGB demo that prints
+    `50%R`/`50%G`/`50%B`, whose TinyUSB CDC does not honour esptool's
+    auto-reset — the first connection needs **hold BOOT, tap RST, release
+    BOOT**. In download mode esptool reports: ESP32-S3 (QFN56) **rev v0.2**,
+    16 MB flash (Boya, 0x68 / 0x4018), flash eFuse **quad**, **8 MB embedded
+    octal PSRAM (AP_3v3)**, 40 MHz crystal, **MAC `ac:27:6e:a5:92:4c`**.
+    The shield reads ESP32-S3-N16R8. N16R8 as advertised.
+  - **Two USB-C, one working.** The live port is the **native USB** — it
+    enumerates `303A:4001 "Espressif Device"` while the demo runs (USB-OTG /
+    TinyUSB) and `303A:1001 "USB JTAG_serial debug unit"` in ROM download
+    mode, because the S3's two USB peripherals share one connector and only
+    one is active at a time. The **second port neither powered the board
+    (RGB LED dark) nor enumerated anything**, despite having its own
+    USB-UART bridge (QFN beside the connector; header TX/RX = GPIO 43/44).
+    Unexplained — not yet chased past swapping the cable over.
+  - **Photo** confirms the header pinout, the `RGB` and `IN-OUT` solder
+    jumpers by the WS2812, and that every pin the new map uses is broken
+    out. Board dimensions still unmeasured.
+  - **`include/pins.h` now carries two maps**, selected by
+    `CONFIG_IDF_TARGET_ESP32S3`; the header includes `<sdkconfig.h>` itself
+    because `keyer.cpp` and `fsk.cpp` reach `pins.h` before `Arduino.h`, and
+    an undefined macro would have silently kept the classic map (which
+    compiles fine on the S3 and would key nothing). Verified by dropping a
+    temporary `#error` in the S3 branch and watching the build fail on it.
+    The classic map is untouched.
+  - **`[env:esp32s3-vukeyer]` fixed for the real module.** The
+    `esp32-s3-devkitc-1` board file assumes 8 MB flash and no PSRAM;
+    it now sets `board_build.arduino.memory_type = qio_opi` (the quad-flash /
+    octal-PSRAM combination the eFuse reports — wrong value and the PSRAM
+    simply never appears), 16 MB flash, `-DBOARD_HAS_PSRAM`, and
+    `monitor_dtr/rts = 0` so opening the monitor cannot strap the chip into
+    the bootloader over USB-Serial/JTAG.
+  - **Both envs build** (S3: 39.9% of the 3 MB app slot, 26.8% RAM).
+    Nothing has been flashed to the S3 and nothing is wired to it; the
+    keyer in service is untouched.
+
 ## Network placement (measured 2026-09-10)
 
 Manoj's LAN is segmented and **routed between segments**. The keyer was
@@ -2136,18 +2217,21 @@ against exposing it beyond one.
    Also not built, now that a display exists to make them worth having:
    a **command button** on one of the input-only spares (35/36/39) for
    menu/message playback, and showing **decoded sent text** on the panel.
-10. **ESP32-S3 port — boards ordered 2026-09-16, not yet arrived.** On
-    arrival: check the shield says WROOM-1-N16R8; photograph both sides
-    (identify the USB-serial chip, read the solder pads); `esptool flash_id`
-    and the PSRAM size at boot; measure length and both USB-C positions.
-    Port work: full pin remap (no GPIO 32/33/34 on the S3; speed pot to
-    ADC1 = GPIO 1–10; avoid 35–37 octal PSRAM, 19/20 native USB, 0/3/45/46
-    strapping), the `esp32s3-vukeyer` env's native-USB CDC as the WinKeyer
-    port, a NimBLE transport for `bt.cpp` or USB host for the dongle, and the
-    enclosure resized (currently modelled on the esp32dev 55.3 × 28.3 with one
-    USB-C cutout). **OTRSP/SO2R is not
-    planned for this box** and its pin reservation has been dropped — SO2R
-    stays in `~/projects/SO2R box`.
+10. **ESP32-S3 port — board arrived 2026-09-23; pin map and env done, nothing
+    flashed.** Arrival checks passed: shield reads ESP32-S3-N16R8, esptool
+    confirms rev v0.2 / 16 MB quad flash / 8 MB octal PSRAM, MAC
+    `ac:27:6e:a5:92:4c`. The pin remap and the env are done (see the S3 pin
+    map above). **Still open:** the native-USB CDC descriptor as the WinKeyer
+    port (unique serial, "VU2CPL VUKEYER" product string) — the thing that
+    actually fixes the `usbserial-0001` problem; a NimBLE transport for
+    `bt.cpp` or USB host for the K220 dongle; first flash and bring-up on the
+    S3; measuring the board for the enclosure (still modelled on the esp32dev
+    55.3 × 28.3 with one USB-C cutout, and this board has two).
+    **The second USB-C did not power or enumerate** on first try even though
+    it has its own USB-UART bridge — chase the cable, the seating, then the
+    connector's solder before believing it is by design.
+    **OTRSP/SO2R is not planned for this box** and its pin reservation has
+    been dropped — SO2R stays in `~/projects/SO2R box`.
 11. **RTTY FSK on GPIO27** (2026-09-11): Baudot/ITA2, 45.45 baud, 1.5 stop
     bits, LTRS/FIGS shift tracking, diddle, invertible polarity. Timing
     verified against theory; **polarity and on-air copy are unverified** —

@@ -39,6 +39,13 @@ the fit checks:
 | `kit_l`, `kit_w`, `usb_dz` | 55.3 × 28.3, 1.6 mm | devkit PCB, USB-C centre above the PCB — **confirmed** |
 | `piezo_d` | 12.4 mm | passive piezo body — **measured 12 mm** |
 
+**The case fits the classic ESP32 devkit only.** An ESP32-S3 N16R8 board
+has been on the bench since 2026-09-23 and would need `kit_l`, `kit_w` and
+the back panel reworked: it is a different length (not yet measured) and
+carries **two USB-C connectors side by side** on one end, where the case
+has a single cutout. Nothing has been built on the S3 yet, so the defaults
+above are deliberately left as they are.
+
 A quick check before the full print: set `part="tray"`, add a
 `projection(cut=true)` or just print the back wall alone at 100% as a thin
 test strip, and try the jacks and USB plug in it.
