@@ -2074,8 +2074,38 @@ makes the keyer feel slow.
     `monitor_dtr/rts = 0` so opening the monitor cannot strap the chip into
     the bootloader over USB-Serial/JTAG.
   - **Both envs build** (S3: 39.9% of the 3 MB app slot, 26.8% RAM).
-    Nothing has been flashed to the S3 and nothing is wired to it; the
-    keyer in service is untouched.
+
+- **2026-09-23 (evening)** — **S3 wired up and brought up on the bench. One
+  real bug found; the Bluedroid route ruled out.** Manoj wired the full set
+  of signals to the new pins and the firmware was flashed over the CH343.
+  - **What passes, on hardware:** paddle on 5/6 (28 clean transitions, no
+    bounce, firmware's own verdict "levers detected — wiring is good");
+    speed pot on GPIO 4 (two full sweeps, 10–35 WPM both directions, no
+    jitter — enabling it made the keyer walk 20 → 22 → 23 to the knob's
+    real position, which is what a quiet ADC looks like); FSK on GPIO 14;
+    OLED **SH1106 at 0x3C on I²C 8/9**, detected and driven; keying timing
+    `PARIS` at 20 WPM = 3.052 s against 3.000 s theory; WiFi, mDNS, the
+    web page, `/api/*` and MQTT all up. The WinKeyer engine answers over
+    native USB: host open → `0x17`, echo → `0x58`, get-values correct.
+  - **NOT eyeballed:** the KEY/PTT LEDs. The firmware drives 7/15/18/21 and
+    `/api/tune` reports key-down correctly, but nobody has watched the
+    lines themselves.
+  - **BUG — no BUSY status bytes during a send.** See open item 16.
+  - **The `/i2c` scan lies on the S3**: it reports ~40 phantom addresses
+    (0x06, 0x08, 0x0A, 0x0D …) beside the genuine 0x3C/0x3D. The probe at
+    `display.cpp:505` uses a zero-length `Wire.endTransmission()`, which
+    the S3's newer I²C driver acks for addresses that are not there.
+    Detection itself is unaffected — the panel is identified correctly —
+    so it is the diagnostic that is wrong, not the display code.
+  - **Stale pin numbers in user-visible strings.** `/status` prints
+    "on GPIO34" (`main.cpp:117`), the I²C failure hint says "SDA must be
+    GPIO21, SCL GPIO22" (`display.cpp:522`), `/paddle`'s failure text names
+    GPIO25/26, and ~8 web-page tooltips name GPIO 33/32/19/27/4. All
+    cosmetic, all wrong on the S3; they want the `PIN_*` macros.
+  - **Board state left behind:** host baud **1200** (WinKeyer-ready),
+    `pot=on` persisted, joined WiFi `apnet-trusted` as **192.168.10.128**.
+    Manoj went back to the classic keyer afterwards; the S3 is a bench
+    board, not in service.
 
 ## Network placement (measured 2026-09-10)
 
@@ -2207,10 +2237,33 @@ against exposing it beyond one.
    actions in the keyer, background reconnect, bond pruning.
 
    Routes forward, in order of promise:
-   - **ESP32-S3 + NimBLE.** The S3 core ships NimBLE (much lighter than
-     Bluedroid) and `esp_hidh_nimble.h`; `bt.cpp` compiles to stubs there
-     today and would need a NimBLE transport (GAP scan/security are
-     different APIs; the key/queue/UI half carries over). The S3 also has
+   - **ESP32-S3 + NimBLE.** Corrected 2026-09-23 after looking in the
+     actual libs: the S3 core ships NimBLE, but its `libesp_hid.a` contains
+     **only `esp_hidd.c.obj` and `esp_hidh.c.obj` — no transport at all**
+     (the classic ESP32's also has `ble_hidh`, `bt_hidh`, `ble_hidd`,
+     `bt_hidd`). There is no `esp_hidh_nimble.h` to lean on, so this is not
+     "swap the transport", it is **write an HID-over-GATT client**: find
+     service 0x1812, read the report map, subscribe to input reports, parse
+     the HID descriptor. NimBLE's central role is enabled
+     (`CONFIG_BT_NIMBLE_ROLE_CENTRAL=y`), so the radio side is ready. The
+     key/queue/UI half of `bt.cpp` carries over untouched.
+   - **DEAD END, tried 2026-09-23: forcing Bluedroid back on with
+     `custom_sdkconfig`.** It looks like it should work — pioarduino
+     supports the option, and setting `CONFIG_BT_BLUEDROID_ENABLED=y`
+     genuinely flips the config, so `bt.cpp` stops compiling its stub. Then
+     it dies on `fatal error: esp_bt_main.h: No such file or directory`,
+     because `custom_sdkconfig` rewrites the config the **application**
+     compiles against while the Arduino core libraries are **prebuilt
+     binaries** that contain no Bluedroid for this chip. Nothing rebuilds
+     them from the IDF source it spends 15 minutes downloading. Real
+     Bluedroid on the S3 means rebuilding arduino-esp32 with
+     **esp32-arduino-lib-builder** and then owning a custom core forever.
+     Two side effects worth knowing if anyone tries again: it mutates the
+     **shared** `sdkconfig` in the framework package (building any plain env
+     restores it), and it drops `.dummy/`, `managed_components/` and
+     `sdkconfig.defaults` into the project. It also resolves
+     `board_build.partitions` against the project dir, so the framework's
+     bundled `huge_app.csv` is not found and needs a copy in the repo. The S3 also has
      USB host for the K220's 2.4 GHz receiver. No S3 board has run the
      keyer yet. **Two S3 N16R8 dual-USB-C boards ordered 2026-09-16** (see
      What changed).
@@ -2226,16 +2279,22 @@ against exposing it beyond one.
    Also not built, now that a display exists to make them worth having:
    a **command button** on one of the input-only spares (35/36/39) for
    menu/message playback, and showing **decoded sent text** on the panel.
-10. **ESP32-S3 port — board arrived 2026-09-23; pin map and env done, nothing
-    flashed.** Arrival checks passed: shield reads ESP32-S3-N16R8, esptool
+10. **ESP32-S3 port — board arrived, wired and brought up 2026-09-23. It
+    works; it is not in service.** Arrival checks passed: shield reads ESP32-S3-N16R8, esptool
     confirms rev v0.2 / 16 MB quad flash / 8 MB octal PSRAM, MAC
     `ac:27:6e:a5:92:4c`. The pin remap and the env are done (see the S3 pin
-    map above). **Still open:** the native-USB CDC descriptor as the WinKeyer
-    port (unique serial, "VU2CPL VUKEYER" product string) — the thing that
-    actually fixes the `usbserial-0001` problem; a NimBLE transport for
-    `bt.cpp` or USB host for the K220 dongle; first flash and bring-up on the
-    S3; measuring the board for the enclosure (still modelled on the esp32dev
-    55.3 × 28.3 with one USB-C cutout, and this board has two).
+    map above). Everything on it works on hardware — see the 2026-09-23
+    evening entry in What changed. **Still open:** the native-USB CDC
+    descriptor as the WinKeyer port (unique serial, "VU2CPL VUKEYER"
+    product string). Note that as configured today (`ARDUINO_USB_MODE=1`,
+    i.e. USB-Serial/JTAG) **opening the native port resets the board** —
+    every connection logs `rst:0x15 (USB_UART_CHIP_RESET)` — so the S3 does
+    NOT yet fix the logger-resets-the-keyer problem; that needs the TinyUSB
+    path (`ARDUINO_USB_MODE=0`), which is the same work as the descriptor.
+    Also open: an HID-over-GATT client for `bt.cpp` (item 9) or USB host for
+    the K220 dongle; and measuring the board for the enclosure (still
+    modelled on the esp32dev 55.3 × 28.3 with one USB-C cutout, and this
+    board has two).
     **Both USB-C cables must be plugged in** for the CH343 port to exist —
     the bridge is board-powered. That port has a unique serial number and
     flashes with auto-reset, so bench work can use it today.
@@ -2853,6 +2912,37 @@ against exposing it beyond one.
     per WPM and kept in NVS; see What changed. Not yet exercised: speeds
     below 10 or above 35 learned directly (they interpolate from 10/35 for
     now).
+
+16. **BUG (found 2026-09-23 on the S3, classic board NOT yet checked): the
+    keyer sends NO status bytes while it is sending.** A logger needs the
+    BUSY bit to know when the keyer has finished; on the S3 it never
+    arrives. The keyer's own `/api/wktrace` of a session shows the whole
+    story:
+
+        H>K 00 . / H>K 02 .      host open
+        K>H 17 .                 the version reply — the ONLY byte it sends
+        H>K 50 P 41 A 52 R 49 I 53 S 20      text arrives
+        H>K 00 . / H>K 03 .      host close
+
+    The text IS keyed — `/api/state` shows `busy` true for exactly the right
+    6.0 s on "PARIS PARIS" at 20 WPM — but not one status byte is emitted.
+    It is **not** the transport: with the same session open, `/api/tune` on
+    produced `DC` and off produced `C0` on the wire immediately. So the
+    sink, the USB CDC and `hostIsOpen` are all fine, and it reproduces
+    whether the text arrives over the serial host link or `/api/send`.
+
+    That points at the busy bookkeeping in `emitStatus()`
+    (`hostlink.cpp:265`): tune raises BUSY through `Keyer::tuning()`, which
+    works, while a buffered send raises it through
+    `Keyer::busy() || !bufEmpty()`, which never reads true where the
+    function samples it — so `s` never differs from `lastStatus` and the
+    `if (force || s != lastStatus)` guard emits nothing.
+
+    **First thing to do: plug the classic board in and run the same three
+    lines.** The 2026-09-13 K1EL audit verified status bytes against a real
+    WK3.1, so either something regressed since or it is S3-specific — and
+    the answer decides whether this is a bench curiosity or a bug in the
+    keyer that is actually in service with RUMlogNG.
 
 ## Conventions (see ~/.claude/CLAUDE.md)
 

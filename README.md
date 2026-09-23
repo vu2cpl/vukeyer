@@ -45,8 +45,12 @@ only ~26 KB of heap — too little for WiFi, so the board drops off the
 network. A boot-time check now switches Bluetooth back off and restarts
 when free heap is under 60 KB, and the page says why. Realistic routes are
 an ESP32-S3 (lighter NimBLE stack) or a PSRAM board — see `HANDOVER.md`.
-An **S3 N16R8 board has been on the bench since 2026-09-23** (pin map and
-build environment done, nothing flashed to it yet).
+An **S3 N16R8 board was wired and brought up on 2026-09-23**: the whole
+keyer runs on it, but **the keyboard still does not**. The S3's core ships
+NimBLE with no BLE HID host in it at all, and forcing Bluedroid back on
+with `custom_sdkconfig` does not work — the core libraries are prebuilt
+without it. That leaves writing an HID-over-GATT client, so the keyboard
+remains parked on both boards.
 Classic-Bluetooth-only keyboards are not supported by the core either way.
 
 **Enclosure:** a two-part 3D-printable case with OLED window, pot, KEY LED,
