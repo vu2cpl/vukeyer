@@ -2107,6 +2107,17 @@ makes the keyer feel slow.
     Manoj went back to the classic keyer afterwards; the S3 is a bench
     board, not in service.
 
+- **2026-09-24** — **the missing-status-byte bug is S3-only; the shack keyer
+  is unaffected.** The classic board was put on the bench and given the same
+  three-line protocol test as the S3: host open, send `PARIS`, watch the
+  wire. It answered `c4 c0` on the **flex** backend, and — after switching
+  to `/backend local` and straight back again — `c4 c0` on the **local**
+  backend too. So the flex-vs-local branch in `emitStatus()` is not the
+  cause and nothing regressed in the protocol engine; open item 16 is a
+  fault in the S3 build alone. Its backend was restored to `flex` and the
+  radio reconnected. One oddity, not chased: during the first run the CP2102
+  port delivered 64 bytes of `ff` about 18 s in, once, unrepeated.
+
 ## Network placement (measured 2026-09-10)
 
 Manoj's LAN is segmented and **routed between segments**. The keyer was
@@ -2913,8 +2924,8 @@ against exposing it beyond one.
     below 10 or above 35 learned directly (they interpolate from 10/35 for
     now).
 
-16. **BUG (found 2026-09-23 on the S3, classic board NOT yet checked): the
-    keyer sends NO status bytes while it is sending.** A logger needs the
+16. **BUG — S3 ONLY (found 2026-09-23, narrowed 2026-09-24): the S3 sends
+    NO status bytes while it is sending. The classic board is FINE.** A logger needs the
     BUSY bit to know when the keyer has finished; on the S3 it never
     arrives. The keyer's own `/api/wktrace` of a session shows the whole
     story:
@@ -2938,11 +2949,28 @@ against exposing it beyond one.
     function samples it — so `s` never differs from `lastStatus` and the
     `if (force || s != lastStatus)` guard emits nothing.
 
-    **First thing to do: plug the classic board in and run the same three
-    lines.** The 2026-09-13 K1EL audit verified status bytes against a real
-    WK3.1, so either something regressed since or it is S3-specific — and
-    the answer decides whether this is a bench curiosity or a bug in the
-    keyer that is actually in service with RUMlogNG.
+    **Narrowed 2026-09-24 — the keyer in service is not affected.** The
+    classic board was tested on BOTH backends and emits `c4` (BUSY) then
+    `c0` (idle) on the wire every time:
+
+    | Board | Backend | Status bytes on a send |
+    |---|---|---|
+    | classic ESP32 | flex  | `c4 c0` ✅ |
+    | classic ESP32 | local | `c4 c0` ✅ |
+    | ESP32-S3      | local | none ❌ |
+
+    That kills the two obvious explanations. It is not a regression in
+    `emitStatus()` itself, and it is not the local-vs-flex branch — the
+    classic emits on both. Whatever it is, it is specific to the S3 build.
+    **Not yet tested: the S3 on the flex backend**, which is the one cell
+    of that table still empty, and the cheapest next probe. After that,
+    suspect `Keyer::busy()` visibility between the keyer task on core 1 and
+    `loop()` on the S3, since tune (which raises BUSY through
+    `Keyer::tuning()` instead) works there.
+
+    Test procedure, for repeating it: open the port, `00 02` (expect `17`),
+    send `PARIS `, watch for `c4`/`c0`, `00 03`. `/api/wktrace` records both
+    directions and is the tiebreaker when the wire looks silent.
 
 ## Conventions (see ~/.claude/CLAUDE.md)
 
