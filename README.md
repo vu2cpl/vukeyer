@@ -52,6 +52,9 @@ with `custom_sdkconfig` does not work — the core libraries are prebuilt
 without it. That leaves writing an HID-over-GATT client, so the keyboard
 remains parked on both boards.
 Classic-Bluetooth-only keyboards are not supported by the core either way.
+The small RISC-V parts are not a way out: a C3 has no PSRAM and no USB
+host, and a C2 has no prebuilt Arduino libraries in this core at all — both
+ruled out 2026-09-24, see open item 9 in `HANDOVER.md`.
 
 **Enclosure:** a two-part 3D-printable case with OLED window, pot, KEY LED,
 five RCA sockets for KEY/PTT/FSK, a 3.5 mm paddle jack, 5 V and USB-C, and
