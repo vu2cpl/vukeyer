@@ -2056,9 +2056,13 @@ makes the keyer feel slow.
     hardware, independently of the native-USB descriptor work. It does not
     solve the *reset* half: auto-reset works because DTR/RTS still drive
     EN/IO0, so a logger opening this port would still reset the board.
-  - **Photo** confirms the header pinout, the `RGB` and `IN-OUT` solder
-    jumpers by the WS2812, and that every pin the new map uses is broken
-    out. Board dimensions still unmeasured.
+  - **Photo — `docs/esp32-s3-n16r8-board.jpg`** (component side). It
+    confirms the shield marking, the header pinout both rows, the `RGB` and
+    `IN-OUT` solder jumpers by the WS2812, the USB-UART bridge beside the
+    second USB-C, and that every pin the new map uses is broken out. It is
+    a 1600 × 1200 downscale — the full-resolution original is on Manoj's
+    phone, not in the repo. Board dimensions still unmeasured; the photo
+    has no scale in frame, so it cannot answer that.
   - **`include/pins.h` now carries two maps**, selected by
     `CONFIG_IDF_TARGET_ESP32S3`; the header includes `<sdkconfig.h>` itself
     because `keyer.cpp` and `fsk.cpp` reach `pins.h` before `Arduino.h`, and
