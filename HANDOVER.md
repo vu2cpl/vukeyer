@@ -2122,6 +2122,19 @@ makes the keyer feel slow.
   radio reconnected. One oddity, not chased: during the first run the CP2102
   port delivered 64 bytes of `ff` about 18 s in, once, unrepeated.
 
+- **2026-09-24 (later)** — **ESP32-C2 and ESP32-C3 ruled out from the
+  installed core; nothing ordered, no code touched.** Asked whether either
+  RISC-V part helps the parked keyboard or the S3 port, and answered against
+  `~/.platformio/packages/framework-arduinoespressif32-libs/` rather than
+  from spec sheets. The C2 has no prebuilt Arduino libs in this core at all,
+  so it cannot be built here; the C3 can, but has no PSRAM and no USB OTG,
+  which closes both S3 escape routes in open item 9, and its `libesp_hid.a`
+  is identical to the S3's, so the keyboard stays an HID-over-GATT job. Both
+  are single-core, which is the same objection that dropped the C5 and C6.
+  Recorded in open item 9 and in the board memory's rejected list. The two
+  boards on hand remain the right two; USB host for the K220 dongle is still
+  something only the S3 can do.
+
 ## Network placement (measured 2026-09-10)
 
 Manoj's LAN is segmented and **routed between segments**. The keyer was
@@ -2284,6 +2297,31 @@ against exposing it beyond one.
      What changed).
    - **PSRAM board (ESP32-WROVER).** Unverified whether this precompiled
      core lets Bluedroid/lwIP allocate from SPIRAM — check sdkconfig first.
+   - **RULED OUT 2026-09-24 from the installed core, nothing ordered:
+     ESP32-C2 and ESP32-C3.** Neither is a way out of this item.
+     - **C2 / ESP8684** cannot even be built here: the core's
+       `framework-arduinoespressif32-libs/` ships no `esp32c2` prebuilt libs
+       at all (only a stray `variants/esp32c2/pins_arduino.h` and a
+       PlatformIO board JSON),
+       which is the same prebuilt-binary wall as the Bluedroid dead-end
+       above. Single core, 272 KB SRAM, no PSRAM, no USB peripheral of any
+       kind — the CP2102 reset problem would stay — and 14 GPIO against a
+       build that wants OLED I²C, two paddle inputs, KEY/PTT/FSK, pot ADC,
+       LED and sidetone.
+     - **C3** builds and is a supported target, but closes **both** routes
+       above: no PSRAM (the only `SPIRAM` string in its sdkconfig is an
+       unrelated LittleFS comment, against `CONFIG_SPIRAM=y` on the S3), and
+       no USB host — `CONFIG_SOC_USB_OTG_SUPPORTED` is absent for C3 and
+       present for S3, so the K220 dongle route goes too. Its
+       `libesp_hid.a` holds the same two members as the S3's, with
+       `CONFIG_BT_NIMBLE_ENABLED=y` and Bluedroid unset, so the keyboard is
+       the identical HID-over-GATT job in 400 KB instead of 512 KB + 8 MB.
+       Single core also puts `keyerTask` (core 1, prio 10) on the same core
+       as `display`, `btopen`, `flexscan` and WiFi, so CW timing would need
+       re-validating on the scope. Its one real gain is USB-Serial-JTAG
+       replacing the CP2102 for flash and monitor — but that block has its
+       own DTR/RTS download-reset path, so whether RUMlog's DTR toggling
+       still resets the board is untested, unlike the S3's OTG CDC.
    - **Freeing ~35 KB on esp32dev.** Unlikely without dropping features.
 
    Still true if it is revived: Bluetooth forces WiFi modem sleep on (~85 ms
