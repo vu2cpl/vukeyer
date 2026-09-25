@@ -1,7 +1,7 @@
 # VUKEYER — Project Handover
 *For continuation in a new Claude session*
 
-**Created:** 2026-08-26 · **Updated:** 2026-09-23 · **Type:** ESP firmware
+**Created:** 2026-08-26 · **Updated:** 2026-09-25 · **Type:** ESP firmware
 (esp32dev in service; ESP32-S3 N16R8 on the bench since 2026-09-23) ·
 **Status:** working keyer, **public repo**
 (MIT). RUMlogNG drives it over USB and keys the Flex; OLED/LCD panel,
@@ -833,8 +833,8 @@ makes the keyer feel slow.
     After: 738 polls over 150 s, zero timeouts, worst 73 ms. `secrets.h`
     now sets the real `MQTT_HOST` (local only — never commit it; this repo
     is public); `[MQTT] connected` as `iot`.
-    The broker ACL needed `topic write shack/esp32-vukeyer/#` under
-    `iot` — `iot` cannot write `shack/` by default and the broker drops
+    The broker ACL needed `topic write shack/vukeyer/#` under
+    `iot` (corrected 2026-09-25; this line first said `esp32-vukeyer`) — `iot` cannot write `shack/` by default and the broker drops
     such publishes silently. Publish flow not yet confirmed from a reader.
   - **A dead keyer leaves the Flex in TX, indefinitely.** Twice this
     session the keyer went down mid-over and the radio stayed
@@ -2134,6 +2134,21 @@ makes the keyer feel slow.
   Recorded in open item 9 and in the board memory's rejected list. The two
   boards on hand remain the right two; USB host for the K220 dongle is still
   something only the S3 can do.
+- **2026-09-25** — **MQTT status now reaches the broker; it never had
+  after the rename.** The firmware publishes `shack/vukeyer/status`
+  (`include/config.h` `T_STATUS`), but the shack broker's ACL still granted
+  `iot` only `topic write shack/esp32-winkeyer/#` (the pre-rename name), and
+  these docs said the ACL needed `shack/esp32-vukeyer/#` (matches neither —
+  the MQTT *client id* is `esp32-vukeyer`, the topic isn't). Mosquitto
+  accepts the login and silently drops every publish, so nothing was ever
+  retained under the new topic and a stale `shack/esp32-winkeyer/status`
+  `{"event":"offline"}` sat on the broker. Fixed: ACL line is now
+  `topic write shack/vukeyer/#` (backup `aclfile.bak-20260925-vukeyer`,
+  reloaded with SIGHUP), the stale retained message was deleted, and a live
+  heartbeat was read back as `svc`:
+  `{"event":"heartbeat","uptime_s":13982,"rssi":-65,"wpm":25,"busy":false,"backend":"flex",...}`.
+  README/open item 1 corrected to name the real topic. Found by the shack
+  health check.
 
 ## Network placement (measured 2026-09-10)
 
@@ -2170,9 +2185,9 @@ against exposing it beyond one.
    as `iot`. `secrets.h` also needed **MQTT_HOST**, which was missing, so
    the build had been using the public placeholder `192.168.1.10` all
    along; that dead address is what blocked `loop()` once a minute. The
-   broker ACL needed `topic write shack/esp32-vukeyer/#` under `iot`.
-   **Not yet confirmed:** that the published topic actually arrives — read
-   it in Node-RED or MQTT Explorer.
+   broker ACL needs `topic write shack/vukeyer/#` under `iot` (the topic,
+   not the client id `esp32-vukeyer`). **Confirmed arriving 2026-09-25**
+   after the ACL was corrected — see What changed.
 2. **WiFi link is mediocre but no longer limiting** — 131 ms average,
    0% loss, RSSI -68. Improve when convenient (closer AP, different
    channel, external-antenna board); not a blocker.

@@ -1072,7 +1072,8 @@ radio, where no other machine can watch it.
 
 - Broker: `MQTT_HOST` in `secrets.h` (`config.h` default `192.168.1.10` is a
   placeholder); auth required — role account in `secrets.h`. The account
-  needs **write** on `shack/esp32-vukeyer/#`, or the broker accepts the
+  needs **write** on `shack/vukeyer/#` (the topic — not the client id
+  `esp32-vukeyer`), or the broker accepts the
   login and silently drops every publish.
 - A broker that is down or unreachable costs nothing: the connect is capped
   at 500 ms and never attempted while CW or PTT is active.
