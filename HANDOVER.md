@@ -2251,11 +2251,23 @@ makes the keyer feel slow.
     - **Not done, on purpose:** switching the slice to CW ourselves. That
       changes the operator's radio under a running FT8 session, and the
       display / web page already say why nothing goes out.
-    Not yet flashed at the time of the commit: RUMlogNG held the USB port.
-    **Test to reproduce, once flashed:** slice in DIGU, press a memory —
-    should answer *"Radio slice is in DIGU, not CW"* and key nothing; switch
-    the slice to CW — `/api/flexevents` should show the flush; paddle
-    first — should make power.
+    Flashed once RUMlogNG released the port, and **verified on air the
+    same evening** — Manoj: *"memory refused, switched to cw, paddle and
+    memory both ok."* `/api/flexevents` for the run:
+
+        19581 < cwx sent=12                 prime's space, sent at once
+        68751 # clear: slice left CW        switched to DIGU → flushed
+        71359 # refused: paddle, slice not ready for CW
+        77737 # clear: slice back in CW     switched back → flushed
+        78806 < TRANSMITTING source=SW,SWCW paddle first, power
+        101256 > cwx send ?  → sent=13      web memory
+        109290 > cwx send 7,3,␠,T,U → sent=14…18   RUMlogNG memory
+
+    Both flushes fired, nothing was stranded (indices ran on 12→18 with
+    no erase), and paddle-first made power. The memory refused in DIGU is
+    not in this log: the page turned it away (409) before the Flex layer.
+    With the way in closed, the prime and the stall recovery are belt and
+    braces; keep them, they cost nothing.
 
 ## Network placement (measured 2026-09-10)
 

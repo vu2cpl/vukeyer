@@ -768,7 +768,8 @@ either. No error, from either. Measured on a 6600 with SmartSDR 4.2.20 on
 occurrence: CW handed to the radio **while its slice was in another mode**
 (FT8 on DIGU, then back to CW) — the text is taken, never sent, and the
 generator is stuck behind it. The keyer now refuses to key in that state
-and flushes the buffer when the slice changes (above). The only thing known
+and flushes the buffer when the slice changes (above); verified on air
+2026-09-28: DIGU → memory refused → CW → paddle and memory both keyed. The only thing known
 to release a wedge once it is there is a **`cwx clear` over a non-empty
 buffer**: by hand, play a memory and press STOP, and both memories and the
 paddle come back. The keyer does that for you too, two ways:
