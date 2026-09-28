@@ -2216,6 +2216,17 @@ makes the keyer feel slow.
     it. If it does not, the stall recovery still rescues the first memory
     automatically — but a **paddle-first** session would stay dead, because
     nothing on the API reports that paddle elements made no RF.
+  - **First live check (later the same day):** Manoj restarted AetherSDR
+    and keyed the paddle first — CW normal. `/api/flexevents` shows the
+    keyer following the new handle `0x193AC986`, the prime's space
+    accepted at index 11 and `cwx sent=11` **12 ms later**, then the clear,
+    then paddle keying at `SW,SWCW`. So the radio came up **healthy** after
+    this restart — consistent with the unbound tests (f)/(g) of 09-17 —
+    and the prime was invisible, as designed. It is NOT evidence that the
+    prime cures a wedge, because there was none to cure. Whatever wedged
+    the radio in the morning was not an AetherSDR restart by itself; the
+    trigger is still unknown, and the event ring is now armed to catch it.
+    Next time CW dies: read `/api/flexevents` **before** play/STOP.
 
 ## Network placement (measured 2026-09-10)
 
