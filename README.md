@@ -21,7 +21,7 @@ product name: this is a compatible keyer, not a WinKeyer.
 | Speed pot on GPIO 34 | working, wired and tracking on hardware |
 | WinKeyer protocol engine (WK 2.3 host mode) | working with RUMlogNG; **audited against a genuine K1EL WK3.1 on 2026-09-13; status byte, load-defaults order, admin table and pot byte fixed and re-verified the same night; echo now paced per letter on both backends, within ~60 ms (local) / ~150 ms (Flex) of the K1EL**; admin 0 (Calibrate) argument byte fixed the following morning — it had desynced RUMlogNG's session setup ([findings](docs/k1el-probe-2026-09-13/README.md)) |
 | WiFi TCP transport + mDNS `vukeyer.local` | working, verified over WiFi |
-| FlexRadio backend — **paddle keying over the network** | working, verified on a 6600. **Fixed 2026-09-17:** CW went out at 0 W after a GUI client (SmartSDR/Maestro/AetherSDR) restarted or changed; the keyer now follows the GUI client and no longer sends `client bind` |
+| FlexRadio backend — **paddle keying over the network** | working, verified on a 6600. **Fixed 2026-09-17:** CW went out at 0 W after a GUI client (SmartSDR/Maestro/AetherSDR) restarted or changed; the keyer now follows the GUI client and no longer sends `client bind`. **Worked around 2026-09-28:** the radio's own CW generator still comes up wedged for a new GUI client session — no CW from the paddle or a memory, and no error — so the keyer primes it and re-sends a transmission that never started (see FlexRadio) |
 | RUMlogNG over USB serial (1200 8N2) | working — memories, typed text, echo |
 | Host bridge (`tools/wk-bridge.py`) | implemented, never driven by a real logger; macOS will not let a PTY appear as `/dev/cu.*`, so a logger cannot select it there |
 | OLED status panel (SH1106/SSD1306 128x64) | working, SH1106 at 0x3C on hardware; sent CW scrolls on the bottom band while sending (approved on hardware 2026-09-17) |
@@ -750,10 +750,32 @@ raises PTT but makes no power.
 
 **`client bind` is off by default** (`/flex bind on|off`, web page "bind
 GUI"). On a 6600 in September 2026, binding to a GUI client that had just
-connected left the radio's CW generator stuck: paddle keying and memories
-both keyed the transmitter at 0 W until a stalled `cwx clear` released it.
-Unbound, both work. If a keyer upgraded from an older build still has bind
-switched on in its saved settings, switch it off.
+connected left the radio's CW generator stuck. Unbound it is better, but it
+is not a cure — see below. If a keyer upgraded from an older build still has
+bind switched on in its saved settings, switch it off.
+
+**The radio's CW generator can come up wedged, and nothing says so.** It
+accepts `cwx send`, answers with a buffer index, keys PTT with
+`source=SWCW` — and generates nothing, while paddle keying makes no RF
+either. No error, from either. It starts with a GUI client session
+(measured on a 6600 with SmartSDR 4.2.20 on 2026-09-17 and again on
+2026-09-28), and the only thing known to release it is a **`cwx clear` over
+a non-empty buffer**: by hand, play a memory and press STOP, and both
+memories and the paddle come back. The keyer does that for you, two ways:
+
+- **Prime** (`/api/set?k=flexprime&v=on|off`, default **on**) — two seconds
+  after a GUI client appears, hand the radio one space (ASCII 0x7F:
+  silence, no RF) and clear it. Held back while anything is keying and
+  while the slice is not in CW, so it can never cut a transmission short or
+  key T/R in someone else's SSB or FT8. On a healthy radio it is
+  invisible — the radio reports the space sent in about 10 ms and the
+  interlock never moves.
+- **Stall recovery** — a `cwx send` the radio accepts and then reports no
+  progress on for 1.2 s is cleared and handed over once more. Nothing had
+  been keyed, so nothing is repeated on the air.
+
+If CW dies anyway, read `GET /api/flexevents`: a `cwx erase=<a>,<b>` with
+`cwx sent=0` is this fault, and it is the radio's, not the keyer's.
 
 **Sidetone delay (`/mondelay`, default auto).** The radio generates
 buffered CW itself, so it starts a few hundred ms after being handed the
@@ -904,10 +926,10 @@ tail**, pot enable and range, display, backend (with a **Find radio**
 LAN scan for the Flex), plus a send box and tune. The page is four cards: **KEYER** (with Timing, Speed pot and
 PTT sections), **MEMORIES** (with Send and FSK / RTTY), **BACKEND** and
 **SYSTEM** (Display, USB / WIFI, BT keyboard). The Flex keying internals
-(key verb, bind GUI, xmit) sit in a collapsed **Advanced keying** section with
-a warning, because a wrong value leaves the radio silent with no error. Its
-**DEFAULTS** button puts back the working set: `cw key`, bind GUI off, xmit
-on. Live status LEDs for
+(key verb, bind GUI, prime, xmit) sit in a collapsed **Advanced keying**
+section with a warning, because a wrong value leaves the radio silent with no
+error. Its **DEFAULTS** button puts back the working set: `cw key`, bind GUI
+off, prime on, xmit on. Live status LEDs for
 host, TCP, key, tune, pot, Flex, OLED and KBD, polled once a second.
 
 The **BT KEYBOARD** section of the SYSTEM card (off by default) enables Bluetooth — with a RESTART
@@ -1054,6 +1076,14 @@ it and lists any character the logger sent that was never echoed. `tools/wk-trac
 keeps a whole session (the trace is a ring), flagging drops as they happen;
 `tools/wk-echo-repro.py` sends a message repeatedly over TCP and checks each
 echo — it keys the radio and needs the logger closed.
+
+**`GET /api/flexevents` is the same trace with the element traffic left
+out** — GUI clients arriving and leaving, every CWX command and how far the
+radio got with it, interlock *changes*, and every `#` reason line. Paddle
+keying writes one trace line per element and flushes all 128 of the lines
+below in a couple of overs; this ring holds hours, which is what it takes to
+read a fault that starts at the beginning of a session and is noticed later.
+`?clear=1` empties it.
 
 **`GET /api/flextrace` does the same for the radio link on the Flex
 backend.** It holds the last 128 lines, millisecond-stamped: `>` is every

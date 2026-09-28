@@ -204,6 +204,7 @@ void begin() {
   // to be re-entered after every reflash or board swap.
   { String v = loadStr("flexcmd"); if (v.length()) Flex::setKeyVerb(v.c_str()); }
   Flex::setBind(loadU32("flexbind", 0));   // off: binding wedged CW (item 13)
+  Flex::setPrime(loadU32("flexprime", 1));  // on: unwedge a new GUI client
   Flex::setUseXmit(loadU32("flexxmit", 1));
   Fsk::setBaud(loadU32("fskbaud", 4545) / 100.0f);
   Fsk::setInvert(loadU32("fskinv", 0));
@@ -479,6 +480,12 @@ bool apply(const char* key, const char* val, char* msg, size_t msgLen) {
     Flex::setBind(b); saveU32("flexbind", b);
     snprintf(msg, msgLen, "flex client bind=%s — reconnecting", b ? "on" : "off");
 
+  } else if (!strcasecmp(key, "flexprime")) {
+    if (!boolish(val)) return fail("flexprime: on|off");
+    bool b = truthy(val);
+    Flex::setPrime(b); saveU32("flexprime", b);
+    snprintf(msg, msgLen, "flex cwx prime=%s", b ? "on" : "off");
+
   } else if (!strcasecmp(key, "flexxmit")) {
     if (!boolish(val)) return fail("flexxmit: on|off");
     bool b = truthy(val);
@@ -568,6 +575,7 @@ void toJson(JsonDocument& doc) {
   { char w[128]; Flex::sliceWarning(w, sizeof w, Flex::WARN_LONG); f["slicewarn"] = w; }
   f["cmd"]       = Flex::keyVerb();
   f["bind"]      = Flex::bindEnabled();
+  f["prime"]     = Flex::primeEnabled();
   f["guihandle"] = Flex::guiClientHandle();   // "" = not bound to a GUI client
   f["xmit"]      = Flex::useXmit();
   f["xmiton"]    = Flex::transmitting();  // is the RADIO keyed right now

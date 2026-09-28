@@ -70,6 +70,25 @@ String guiClientHandle();
 void traceDump(Print& out);
 void traceClear();
 
+// The same, minus the element traffic: GUI clients arriving and leaving, the
+// CWX handed over and the radio's progress on it, state changes of the
+// interlock, and every clear with its reason. Paddle keying writes one trace
+// line per element and flushes the trace above in a couple of overs, which
+// leaves nothing to read afterwards; this ring holds hours.
+// Served at GET /api/flexevents (?clear=1 empties it).
+void eventDump(Print& out);
+void eventClear();
+
+// Whether to prime a new GUI client's CWX — queue one space (silence, no RF)
+// and clear it. The radio's CW generator comes up wedged for a new GUI client
+// session: it takes text, keys PTT, and generates nothing, and paddle keying
+// makes no RF either, with no error. A "cwx clear" over a non-empty buffer
+// is the only thing measured to release it (2026-09-17, 2026-09-28), which
+// is what the operator was doing by hand as play-memory-then-STOP. On by
+// default; switchable because it costs one T/R flap per GUI client.
+void setPrime(bool on);
+bool primeEnabled();
+
 // "ptt" (FlexRadio wiki) or "key" (MORCONI). Both are accepted by the
 // radio; only a power meter can say which one keys.
 void        setKeyVerb(const char* verb);

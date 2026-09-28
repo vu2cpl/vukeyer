@@ -84,6 +84,30 @@ CwxSend  cwxSends[32];
 uint8_t  cwxSendNext = 0;
 uint32_t clearSeq = 0;       // replies to commands before this are stale
 
+// ── The radio's CW generator comes up wedged ─────────────
+// Measured twice (2026-09-17 item 13, again 2026-09-28): after a GUI client
+// session starts, the radio accepts "cwx send", answers with a buffer index,
+// keys PTT with source=SWCW — and generates nothing. Paddle "cw key" makes
+// no RF either, with no error from the radio. The only thing seen to release
+// it is a "cwx clear" over a NON-EMPTY buffer: by hand, play a memory, press
+// STOP, and both memories and the paddle come back. "client bind" was
+// suspected and is not the cause — 2026-09-28 reproduced it with bind off
+// and the correct GUI handle, sending 9 characters that came back as
+// "cwx erase=1,9" with "cwx sent=0", i.e. not one was ever keyed.
+//
+// So do that clear automatically, in two places: prime once when a GUI
+// client appears (primeStep below), and if a transmission stalls anyway,
+// clear it and hand the text over again (cwxStart/cwxText below).
+char     cwxText[96];        // text handed over since this transmission began
+uint8_t  cwxTextLen = 0;
+bool     cwxTextAll = true;  // ...and all of it fitted, so it can go again
+uint32_t cwxStartMs  = 0;    // when its first block went out, 0 = not watching
+bool     cwxRetried  = false;
+uint32_t lastSentMs  = 0;    // a "cwx sent=" STATUS arrived (not: we sent text)
+bool     cfgPrime    = true; // prime a new GUI client's CWX
+uint8_t  primeStep   = 0;    // 0 = idle, 1 = queue a space, 2 = clear it
+uint32_t primeAt     = 0;    // when that step is due
+
 // Rough time for the radio to key `n` characters, used only as an upper
 // bound. ~12 dit-units per character is generous for plain text; the
 // point is never to expire early, only to guarantee we expire at all.
@@ -238,6 +262,8 @@ FlexTraceEnt ftrace[FT_N];
 uint16_t ftHead  = 0;
 uint32_t ftTotal = 0;
 
+void evConsider(char dir, const char* text);
+
 void ftAdd(char dir, const char* text) {
   FlexTraceEnt& e = ftrace[ftHead];
   e.ms  = millis();
@@ -248,6 +274,59 @@ void ftAdd(char dir, const char* text) {
   e.text[n] = 0;
   ftHead = (ftHead + 1) % FT_N;
   ftTotal++;
+  evConsider(dir, text);
+}
+
+// ── What happened, with the element traffic left out ─────
+// The trace above is flooded by paddle keying: one line per element, and a
+// couple of overs flush all 128 of them. The lines that explain a session —
+// a GUI client arriving, what CWX was handed over, how much of it the radio
+// says it actually sent, and every clear — are then unreadable after the
+// fact. That is exactly why the 2026-09-28 wedge could not be traced back
+// to the transmission that started it. Keep those lines in a ring of their
+// own, which keying cannot flush: at a handful of lines per over it holds
+// hours. Served at GET /api/flexevents.
+const uint16_t EV_N = 64;
+FlexTraceEnt   events[EV_N];
+uint16_t       evHead  = 0;
+uint32_t       evTotal = 0;
+char           evLastInterlock[FT_LEN] = "";
+
+void evConsider(char dir, const char* text) {
+  bool keep = false;
+  if (dir == '#') {
+    keep = true;                                  // our own reason lines
+  } else if (dir == '>') {
+    // Everything we send except the elements themselves. "|cw " does not
+    // match "|cwx ", the 4th character differs.
+    keep = !strstr(text, "|cw ") && !strstr(text, "|xmit ");
+  } else if (text[0] == 'R') {
+    // "cw key" and "xmit" answer with an empty message ("R609|0|"); the
+    // replies worth keeping carry one ("R606|0|5", "R607|0|1,9").
+    const char* p = strchr(text, '|');
+    p = p ? strchr(p + 1, '|') : nullptr;
+    keep = p && p[1] && p[1] != '\r' && p[1] != '\n';
+  } else if (strstr(text, "|cwx ") || strstr(text, "|client ")) {
+    keep = true;
+  } else {
+    // The interlock repeats every 400 ms while the radio transmits; keep
+    // only the lines that say something new.
+    const char* il = strstr(text, "|interlock tx_client_handle=");
+    if (il && strncmp(il, evLastInterlock, FT_LEN - 1)) {
+      strlcpy(evLastInterlock, il, sizeof evLastInterlock);
+      keep = true;
+    }
+  }
+  if (!keep) return;
+  FlexTraceEnt& e = events[evHead];
+  e.ms  = millis();
+  e.dir = dir;
+  size_t n = strcspn(text, "\r\n");
+  if (n >= FT_LEN) n = FT_LEN - 1;
+  memcpy(e.text, text, n);
+  e.text[n] = 0;
+  evHead = (evHead + 1) % EV_N;
+  evTotal++;
 }
 
 // Every command to the radio goes through here, so every one is traced.
@@ -446,7 +525,10 @@ void onLine(const String& line) {
     if (bar < 0) return;
     String body = line.substring(bar + 1);
     int k = body.indexOf("sent=");
-    if (k >= 0) { sentIdx = body.substring(k + 5).toInt(); lastCwxMs = millis(); }
+    if (k >= 0) {
+      sentIdx = body.substring(k + 5).toInt();
+      lastCwxMs = lastSentMs = millis();   // the radio is keying, not just fed
+    }
     int e = body.indexOf("erase_stop=");
     if (e >= 0) { sentIdx = body.substring(e + 11).toInt(); lastCwxMs = millis(); }
     if (body.startsWith("cwx ")) {
@@ -553,6 +635,10 @@ void onLine(const String& line) {
         Log::printf("[FLEX] keying for GUI client %s (handle %s)\n",
                     id.c_str(), guiHandle.c_str());
       }
+      // A new GUI client is when the radio's CW generator comes up wedged.
+      // Give it a moment to finish connecting (it resets CWX itself as it
+      // does), then prime it.
+      if (cfgPrime) { primeStep = 1; primeAt = millis() + 2000; }
     }
   }
 }
@@ -745,6 +831,21 @@ void traceDump(Print& out) {
 
 void traceClear() { ftHead = 0; ftTotal = 0; }
 
+void eventDump(Print& out) {
+  uint16_t n = evTotal < EV_N ? (uint16_t)evTotal : EV_N;
+  uint16_t i = (evHead + EV_N - n) % EV_N;
+  out.printf("# total %lu, showing %u, now %lu ms, > keyer to radio, < radio to keyer, # why\n",
+             (unsigned long)evTotal, n, (unsigned long)millis());
+  for (uint16_t k = 0; k < n; k++, i = (i + 1) % EV_N)
+    out.printf("%lu %c %s\n", (unsigned long)events[i].ms, events[i].dir,
+               events[i].text);
+}
+
+void eventClear() { evHead = 0; evTotal = 0; evLastInterlock[0] = 0; }
+
+void setPrime(bool on) { cfgPrime = on; if (!on) primeStep = 0; }
+bool primeEnabled()    { return cfgPrime; }
+
 // A key-up in the same form the elements use. "xmit 0" does NOT clear a
 // key the radio still believes is down: it stays in TX on source=SWCW.
 void sendKeyUp() {
@@ -891,9 +992,65 @@ void pumpKeying() {
   }
 }
 
+void queueText(const char* text, bool retry);
+
+// The transmission that never started. The radio took the text, said where
+// it put it, and reported no progress at all — so clear it and hand it over
+// again, which is the operator's play-STOP-play by hand (see cwxStartMs).
+// Once per transmission: if the second attempt stalls too, the backstop in
+// pending() gives up rather than keying the same message forever.
+void watchCwxStall() {
+  if (!cwxStartMs) return;
+  // It started: the radio's own progress report is the only proof, and it
+  // comes within the start latency (94-245 ms measured). From here the
+  // other backstops own this transmission.
+  if (lastSentMs && (int32_t)(lastSentMs - cwxStartMs) > 0) { cwxStartMs = 0; return; }
+  if (!connected() || !sliceReady()) { cwxStartMs = 0; return; }  // said elsewhere
+  uint32_t wait = 1200 + (uint32_t)startLatency * 2;
+  if (millis() - cwxStartMs < wait) return;
+  if (cwxRetried || !cwxTextLen || !cwxTextAll) { cwxStartMs = 0; return; }
+
+  char again[sizeof cwxText];
+  strlcpy(again, cwxText, sizeof again);
+  Log::printf("[FLEX] the radio took \"%s\" and sent nothing in %lu ms — "
+              "clearing its CW generator and sending it again\n",
+              again, (unsigned long)wait);
+  clear("cwx stalled: accepted, nothing keyed");
+  queueText(again, true);
+}
+
+// Prime a new GUI client's CWX, once: queue a single space and clear it.
+// A space is silence — no RF even if the radio is perfectly healthy — and
+// the clear is what unwedges the generator when it is not. Never while
+// anything is keying, so it can never cut a transmission short.
+void pumpPrime() {
+  if (!primeStep || !connected()) return;
+  if ((int32_t)(millis() - primeAt) < 0) return;
+  // Never while anything is keying, and never into a slice that cannot send
+  // CW — the prime would be a T/R flap in someone's SSB or FT8. Stay armed
+  // instead: the point is to prime before the first CW of the session,
+  // whenever that turns out to be.
+  if (keyIsDown || xmitOn || radioTx || pending() > 0 || !sliceReady()) {
+    primeAt = millis() + 500;
+    return;
+  }
+  if (primeStep == 1) {
+    ftAdd('#', "prime: one space for the clear to erase");
+    sendCmd(String("cwx send ") + (char)0x7F);
+    primeAt   = millis() + 400;
+    primeStep = 2;
+  } else {
+    ftAdd('#', "prime: cwx clear (unwedges the radio's CW generator)");
+    sendCmd("cwx clear");
+    primeStep = 0;
+  }
+}
+
 void poll() {
   if (!cfgEnabled || WiFi.status() != WL_CONNECTED) return;
   pumpKeying();
+  watchCwxStall();
+  pumpPrime();
   if (rateActive && millis() - rateLastT > 3000) rateFinish();
   {
     int16_t x = cwExtraFor(Keyer::getWpm());
@@ -973,7 +1130,7 @@ String manualIp()  { return cfgManualIp; }
 String radioIp()   { return cfgManualIp.length() ? cfgManualIp : foundIp; }
 String radioModel(){ return foundModel; }
 
-void send(const char* text) {
+void queueText(const char* text, bool retry) {
   if (!connected() || !text || !*text) return;
   String out;
   for (const char* p = text; *p; p++) out += (*p == ' ') ? (char)0x7F : *p;
@@ -984,6 +1141,20 @@ void send(const char* text) {
   sendCmd("cwx send " + out);
   // Only time a start, not a continuation.
   if (!radioTx && pending() == 0) cwxSendAt = millis();
+  // Watch this transmission for the wedge, and keep the text in case it has
+  // to go again. A logger hands a memory over a few characters at a time, so
+  // the window belongs to the transmission, not to each block.
+  if (!cwxStartMs) {
+    cwxStartMs = millis();
+    cwxRetried = retry;
+    cwxTextLen = 0;
+    cwxTextAll = true;
+  }
+  const char* p = text;
+  for (; *p && cwxTextLen < sizeof cwxText - 1; p++) cwxText[cwxTextLen++] = *p;
+  cwxText[cwxTextLen] = 0;
+  if (*p) cwxTextAll = false;   // longer than the buffer: clear it, but do
+                                // not send half a message again
   lastCwxMs = millis();          // the radio is about to be busy sending
   // Provisional until the reply lands. Count on from wherever the radio has
   // got to: after a clear, a late "cwx erase"/"sent=" leaves sentIdx at the
@@ -995,6 +1166,8 @@ void send(const char* text) {
   busyUntil = millis() + estimateMs(strlen(text)) + 5000;
 }
 
+void send(const char* text) { queueText(text, false); }
+
 void clear(const char* why) {
   if (!connected()) return;
   ftAdd('#', why);
@@ -1003,6 +1176,7 @@ void clear(const char* why) {
   sendCmd("cwx clear");
   queuedIdx = sentIdx = 0;
   busyUntil = 0;
+  cwxStartMs = 0;
   rateActive = false;
 }
 

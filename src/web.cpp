@@ -288,10 +288,11 @@ legend[title]{cursor:help}
   <option value="flex">FlexRadio (network)</option></select>
   <span class="val" id="flexip"></span></div>
 <details class="adv flexonly"><summary>Advanced keying</summary>
-<div class="advwarn">These change how the paddle keys the radio. A wrong value can leave the radio silent (0 W) with no error shown. The working set is cw key, bind GUI off, xmit on &mdash; DEFAULTS puts it back.</div>
+<div class="advwarn">These change how the paddle keys the radio. A wrong value can leave the radio silent (0 W) with no error shown. The working set is cw key, bind GUI off, xmit on, prime on &mdash; DEFAULTS puts it back.</div>
 <div class="row"><label title="Which command sends each paddle element to the radio. 'cw key' transmits. 'cw ptt' is what FlexRadio's wiki documents, but the radio accepts it and produces no RF (found with a power meter). Default: cw key.">Key verb</label>
   <select id="flexcmd"><option value="key">cw key</option><option value="ptt">cw ptt</option></select>
   <label style="flex:0 0 auto" title="Send 'client bind' to the GUI client (SmartSDR, Maestro, AetherSDR). Off by default: binding wedged the radio's CW generator, so CW went out at 0 W after a GUI client restarted. The keyer follows the GUI client without it."><input type="checkbox" id="flexbind"> bind GUI</label>
+  <label style="flex:0 0 auto" title="When a GUI client appears, hand the radio one space and clear it. The radio's CW generator comes up wedged for a new GUI client session &mdash; it takes text, keys PTT and generates nothing, and the paddle makes no RF either &mdash; and a cwx clear over a non-empty buffer is what releases it. This is the play-a-memory-then-STOP fix, done for you. Default: on."><input type="checkbox" id="flexprime"> prime</label>
   <label style="flex:0 0 auto" title="Take the transmitter with 'xmit 1' before paddle keying and release it with 'xmit 0' after the tail. The radio only keys for the client that holds the transmitter, so paddle keying needs this on. Memories and typed text are not affected. Default: on."><input type="checkbox" id="flexxmit"> xmit</label>
   <button onclick="flexDefaults()">DEFAULTS</button></div>
 </details>
@@ -354,14 +355,16 @@ function note(t,err){const m=$('msg');m.textContent=t;m.className=err?'err':''}
 async function post(u){const r=await fetch(u,{method:'POST'});const t=await r.text();
   note(t,!r.ok);refresh()}
 const KEYMAP={fskbaud:'fskbaud',fskinv:'fskinv',fskdid:'fskdiddle',
-              flexbind:'flexbind',flexxmit:'flexxmit',flexcmd:'flexcmd'};
+              flexbind:'flexbind',flexxmit:'flexxmit',flexcmd:'flexcmd',
+              flexprime:'flexprime'};
 function set(k,v){post('/api/set?k='+(KEYMAP[k]||k)+'&v='+encodeURIComponent(v))}
-// Back to the combination verified on air: cw key, no bind, xmit on.
+// Back to the combination verified on air: cw key, no bind, xmit on, prime on.
 async function flexDefaults(){
   await post('/api/set?k=flexcmd&v=key');
   await post('/api/set?k=flexbind&v=off');
   await post('/api/set?k=flexxmit&v=on');
-  note('advanced keying back to defaults: cw key, bind GUI off, xmit on',false)}
+  await post('/api/set?k=flexprime&v=on');
+  note('advanced keying back to defaults: cw key, bind GUI off, xmit on, prime on',false)}
 function send(){const t=$('txt').value.trim();if(!t)return;
   post('/api/send?t='+encodeURIComponent(t));$('txt').value='';setBtn('sendBtn',true)}
 function fsksend(){const t=$('fsktxt').value.trim();if(!t)return;
@@ -490,6 +493,7 @@ async function refresh(){
     flexOpt.remove();      // the firmware has already moved keying to local
   }
   $('flexbind').checked=s.flex.bind; $('flexxmit').checked=s.flex.xmit;
+  $('flexprime').checked=s.flex.prime;
   if(editing!=='flexip') $('flexip').value=s.flex.ip||'';
   if(s.ip) $('scannet').placeholder=s.ip.split('.').slice(0,3).join('.');
   {
@@ -586,7 +590,7 @@ $('flexip').onblur =()=>{editing=null;set('flexip',$('flexip').value)};
 for(const id of ['mode','backend','dispctl','baud','pecho','fskbaud','radio','flexcmd','txpower'])
   $(id).onchange=e=>set(id,e.target.value);
 for(const id of ['swap','pot','disp','ptt','st','monitor','practice','fskinv','fskdid',
-                 'flex','flexbind','flexxmit','bt'])
+                 'flex','flexbind','flexprime','flexxmit','bt'])
   $(id).onchange=e=>set(id,e.target.checked?'on':'off');
 $('txt').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
 $('fsktxt').addEventListener('keydown',e=>{if(e.key==='Enter')fsksend()});
@@ -821,6 +825,28 @@ void begin() {
     server.setContentLength(CONTENT_LENGTH_UNKNOWN);
     server.send(200, "text/plain", "");
     Flex::traceDump(out);
+    out.flush();
+    server.sendContent("");
+  });
+  // The same, without the element traffic — see Flex::eventDump().
+  server.on("/api/flexevents", HTTP_GET, []() {
+    if (server.hasArg("clear")) {
+      Flex::eventClear();
+      server.send(200, "text/plain", "cleared\n");
+      return;
+    }
+    struct Chunked : Print {
+      char buf[1024]; size_t n = 0;
+      size_t write(uint8_t c) override {
+        buf[n++] = (char)c;
+        if (n == sizeof buf) flush();
+        return 1;
+      }
+      void flush() override { if (n) server.sendContent(buf, n); n = 0; }
+    } out;
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "text/plain", "");
+    Flex::eventDump(out);
     out.flush();
     server.sendContent("");
   });

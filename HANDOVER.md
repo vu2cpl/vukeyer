@@ -1,7 +1,7 @@
 # VUKEYER — Project Handover
 *For continuation in a new Claude session*
 
-**Created:** 2026-08-26 · **Updated:** 2026-09-25 · **Type:** ESP firmware
+**Created:** 2026-08-26 · **Updated:** 2026-09-28 · **Type:** ESP firmware
 (esp32dev in service; ESP32-S3 N16R8 on the bench since 2026-09-23) ·
 **Status:** working keyer, **public repo**
 (MIT). RUMlogNG drives it over USB and keys the Flex; OLED/LCD panel,
@@ -9,6 +9,14 @@ speed pot, settings web page, memories, second radio and RTTY FSK all on
 hardware.
 
 **Read this first if you are picking the project up after 2026-09-12:**
+
+- **THE FLEX WEDGE IS NOT CURED, ONLY PAPERED OVER (2026-09-28).** The
+  radio's CW generator still comes up wedged for a new GUI client session —
+  it takes text, keys PTT and generates nothing, and the paddle makes no RF
+  either, with no error anywhere. The keyer now primes it (one space, then
+  a clear) and re-sends a transmission that never started, which is what
+  Manoj was doing by hand as play-a-memory-then-STOP. `client bind` was
+  blamed for this in September and is **not** the cause. Open item 13.
 
 - **S3 BOARD ON THE BENCH 2026-09-23.** The first of the two ESP32-S3
   N16R8 boards is here and verified: rev v0.2, 16 MB quad flash (Boya
@@ -2150,6 +2158,65 @@ makes the keyer feel slow.
   README/open item 1 corrected to name the real topic. Found by the shack
   health check.
 
+- **2026-09-28** — **the wedged CW generator is handled by the keyer now,
+  and `client bind` was never the cause.** Manoj: *"same no cw out has come
+  back. i have to play, then stop to make it work"* — both the paddle and
+  memories dead, cured by playing a memory and pressing STOP. The keyer's
+  own `/api/flextrace` caught it whole:
+
+      25773531 > C606|cwx send 73TU
+      25773546 < R606|0|5                    accepted, buffer index 5
+                …TRANSMITTING source=SWCW, no "cwx sent=" at all…
+      25777065 # clear: web STOP
+      25777069 > C607|cwx clear
+      25777095 < S7BF8A842|cwx erase=1,9     nine characters erased
+      25777102 < S3C666508|cwx sent=0        NOT ONE was ever keyed
+      25778929 > C608|xmit 1 … cw key …      paddle works again, SW,SWCW
+
+  This was **failure B of open item 13, with `client bind` off** (`/api/state`
+  `bind:false`) **and the correct GUI handle** — the radio's own
+  `sub client all`, read from the Mac, listed one GUI client, AetherSDR on
+  `0x3C666508`, exactly what the keyer was keying under. So conclusion (f)
+  of item 13, "`client bind` is the trigger", is **wrong**: binding is one
+  way in, not the way in. The erase range starting at 1 says the wedge began
+  at the FIRST CWX of that GUI client session, as item 13 (c) described.
+
+  Three changes, all in the Flex backend, flashed and verified on the
+  classic board:
+  - **Prime (`flexprime`, default on).** Two seconds after a GUI client is
+    adopted — and again after any keyer reconnect, since that re-adopts —
+    the keyer hands the radio **one space** (0x7F: silence, no RF) and
+    clears it. That is the operator's play-a-memory-then-STOP, done before
+    the first real transmission instead of after a dead one. Held back
+    while anything is keying or the slice is not in CW, so it can never
+    cut a transmission short or flap T/R in someone's SSB or FT8. On a
+    healthy radio it is invisible: the first run after flashing gave
+    `cwx send <space>` → `R8|0|10` → `cwx sent=10` in 11 ms with no
+    interlock change at all.
+  - **Stall recovery.** A `cwx send` that the radio accepts and then makes
+    no progress on for 1.2 s + 2× the measured start latency is cleared and
+    handed over **once** again. Nothing was keyed, so nothing is repeated
+    on the air — the `cwx erase`/`sent=0` above is the proof. Not done for a
+    message too long for the 96-byte buffer (half a message must never go
+    out twice) and not a second time: the 5 s backstop in `pending()` still
+    has the last word.
+  - **`GET /api/flexevents`.** The reason the onset was never traced: paddle
+    keying writes one `/api/flextrace` line per element and flushes all 128
+    in a couple of overs. The new ring keeps the same lines **minus the
+    element traffic** — clients arriving and leaving, every CWX command and
+    the radio's progress on it, interlock state *changes* only, and every
+    `#` reason line. A handful of lines per over, so it holds hours.
+  - Also learned, from the first event dump: **the CWX object the keyer
+    writes into belongs to the GUI client** — the keyer's own handle this
+    session was `0x3DF528AC`, it queued the prime, and the progress came
+    back as `S3C666508|cwx sent=10`, under AetherSDR.
+  - **Still untested:** whether the prime actually releases a *wedged*
+    generator. It is the same clear-over-a-non-empty-buffer that works by
+    hand, but only a fresh GUI client while the fault is live will prove
+    it. If it does not, the stall recovery still rescues the first memory
+    automatically — but a **paddle-first** session would stay dead, because
+    nothing on the API reports that paddle elements made no RF.
+
 ## Network placement (measured 2026-09-10)
 
 Manoj's LAN is segmented and **routed between segments**. The keyer was
@@ -2621,12 +2688,33 @@ against exposing it beyond one.
       are cached in RAM and written through; the namespace is created
       read-write at boot.
 
-13. **RESOLVED 2026-09-17 (14:40), one loose end — Flex backend: CW keying
-    dies after every paddle key.** The loose end: failure B recurred once
-    unbound at ~15:06 (What changed, 15:00–15:22). Fixed by following the GUI client and not binding;
-    see What changed, 14:40. The investigation below is kept as it ran,
-    including leads that turned out wrong. A Maestro takeover, with a second
-    GUI client present when the first left, was verified at 14:44.
+13. **Failure A resolved 2026-09-17, failure B NOT — Flex backend: CW keying
+    dies after every paddle key.**
+    - **Failure A, the stale GUI handle: fixed** by following the GUI client
+      instead of capturing it once (What changed, 14:40). A Maestro
+      takeover, with a second GUI client present when the first left, was
+      verified at 14:44.
+    - **Failure B, the radio's wedged CW generator: still happens, and the
+      2026-09-17 conclusion about it is wrong.** It was blamed on
+      `client bind` — conclusion (f) below — but **2026-09-28 reproduced it
+      with bind off and the correct handle** (What changed): the radio took
+      nine characters, keyed PTT at `source=SWCW`, and returned
+      `cwx erase=1,9` with `cwx sent=0` when STOP finally cleared it. Not
+      one character was ever keyed, and the paddle was dead with it.
+      Binding is one way into this state, not the way in. It had already
+      recurred once unbound at ~15:06 on 09-17 (What changed, 15:00–15:22),
+      which should have been the clue.
+    - **What the keyer does about it now (2026-09-28):** primes a new GUI
+      client's CWX with one space and a clear (`flexprime`, default on),
+      and clears + re-sends a transmission the radio accepts and never
+      starts. Both are the operator's play-then-STOP, automated. The cause
+      inside the radio is still unknown, and a paddle-first session would
+      still be dead if the prime does not release it — `GET /api/flexevents`
+      exists to catch that, since the element traffic used to flush the
+      trace before anyone could read it.
+
+    The investigation below is kept as it ran, including the leads that
+    turned out wrong.
 
     **Measured.** 40 transmissions, 13:15–13:27 IST, read-only from the Mac:
     `flex_status_lines.py` and `flex_meters_watch.py` from
@@ -2897,6 +2985,8 @@ against exposing it beyond one.
     unbound.
 
     **(f) 14:34, clean: `client bind` is the trigger for failure B.**
+    *(Retracted 2026-09-28: failure B happens unbound too — see the head of
+    this item. What follows is the measurement as it was made.)*
     AetherSDR was restarted (`0x4BBEFA80`) and sent no CW itself. The
     keyer's handle was refreshed with `flexbind off`, and no `client bind`
     was sent. A keyer memory first ran normally (`cwx sent=1402…1418`,
