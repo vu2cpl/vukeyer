@@ -733,10 +733,16 @@ output is disabled in this mode so the rig is not keyed twice.
 
 - SmartSDR must have **a slice in use, in CW mode**. With no slice the
   radio simply transmits nothing. `/status` reports readiness, the web
-  page and OLED show a warning naming the slice's mode, and the console
-  warns when you key without it. The keyer follows the last slice the
-  radio reports, not specifically the TX slice, so with two slices open
-  the warning can be wrong.
+  page and OLED show a warning naming the slice's mode (`FLX!`,
+  `SLICE DIGU NOT CW`), and **the keyer refuses to key until it is
+  fixed**: paddle elements are dropped, SEND and a memory's PLAY on the
+  page answer *"Radio slice is in DIGU, not CW"* instead of "sent", and a
+  logger's text is discarded. It used to warn and key anyway, and text the
+  radio takes in the wrong mode is never sent — it sits in the CWX buffer
+  and is the likely cause of the wedge described below. The buffer is
+  flushed whenever the slice changes readiness. The keyer follows the
+  last slice the radio reports, not specifically the TX slice, so with
+  two slices open the warning can be wrong.
 - SmartSDR (a GUI client) must be connected — with none the radio reports
   `tx_allowed=0` and nothing may transmit at all.
 
@@ -757,11 +763,15 @@ bind switched on in its saved settings, switch it off.
 **The radio's CW generator can come up wedged, and nothing says so.** It
 accepts `cwx send`, answers with a buffer index, keys PTT with
 `source=SWCW` — and generates nothing, while paddle keying makes no RF
-either. No error, from either. It starts with a GUI client session
-(measured on a 6600 with SmartSDR 4.2.20 on 2026-09-17 and again on
-2026-09-28), and the only thing known to release it is a **`cwx clear` over
-a non-empty buffer**: by hand, play a memory and press STOP, and both
-memories and the paddle come back. The keyer does that for you, two ways:
+either. No error, from either. Measured on a 6600 with SmartSDR 4.2.20 on
+2026-09-17 and again on 2026-09-28. The likely way in, from the second
+occurrence: CW handed to the radio **while its slice was in another mode**
+(FT8 on DIGU, then back to CW) — the text is taken, never sent, and the
+generator is stuck behind it. The keyer now refuses to key in that state
+and flushes the buffer when the slice changes (above). The only thing known
+to release a wedge once it is there is a **`cwx clear` over a non-empty
+buffer**: by hand, play a memory and press STOP, and both memories and the
+paddle come back. The keyer does that for you too, two ways:
 
 - **Prime** (`/api/set?k=flexprime&v=on|off`, default **on**) — two seconds
   after a GUI client appears, hand the radio one space (ASCII 0x7F:

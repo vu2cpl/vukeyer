@@ -568,10 +568,24 @@ void onLine(const String& line) {
 
     if (body.startsWith("slice ")) {
       String v;
+      bool wasReady = sliceInUse && sliceIsCw;
       if (kv(body, "in_use", v)) sliceInUse = (v == "1");
       if (kv(body, "mode",   v)) {
         sliceIsCw = (v == "CW");
         strlcpy(sliceMode, v.c_str(), sizeof sliceMode);
+      }
+      bool nowReady = sliceInUse && sliceIsCw;
+      // The slice has changed what it can send: throw away whatever the
+      // radio is holding in CWX, ours or anyone's. Text queued while the
+      // slice was not CW is never sent and is suspected of wedging the
+      // generator once it is; text queued while it was CW is stranded the
+      // other way. Not while the radio is transmitting — that would cut
+      // short a transmission from another client.
+      if (nowReady != wasReady && subscribed && !radioTx && !keyIsDown) {
+        Flex::clear(nowReady ? "clear: slice back in CW, flushing what was queued meanwhile"
+                       : "clear: slice left CW, flushing what was queued");
+        Log::printf("[FLEX] slice %s — radio CWX buffer flushed\n",
+                    nowReady ? "ready for CW" : "not ready for CW");
       }
     }
 
@@ -872,11 +886,20 @@ void pumpKeying() {
     // Say why nothing will happen, rather than keying into the void. The
     // radio reports no error for either of these — it simply transmits
     // nothing, which is indistinguishable from a broken keyer.
-    if (e.down && (!sliceInUse || !sliceIsCw) && millis() - lastWarnMs > 5000) {
-      lastWarnMs = millis();
-      Log::printf("[FLEX] warning: %s — the radio will not transmit\n",
+    if (!sliceInUse || !sliceIsCw) {
+      if (e.down && millis() - lastWarnMs > 5000) {
+        lastWarnMs = millis();
+        ftAdd('#', "refused: paddle, slice not ready for CW");
+        Log::printf("[FLEX] paddle not sent: %s\n",
                     !sliceInUse ? "no slice in use in SmartSDR"
                                 : "the slice is not in CW mode");
+      }
+      // Dropped, not sent into the void: an "xmit 1" plus elements the
+      // radio cannot key is a T/R flap in the wrong mode, and what it
+      // leaves behind is suspected of wedging the CW generator. If the
+      // key is down from before the slice changed, release it below.
+      if (!keyIsDown && !xmitOn) continue;
+      if (e.down) continue;
     }
     if (e.down && !xmitOn && cfgUseXmit) {
       txf("C%lu|xmit 1\n", (unsigned long)seq++);
@@ -992,7 +1015,7 @@ void pumpKeying() {
   }
 }
 
-void queueText(const char* text, bool retry);
+bool queueText(const char* text, bool retry);
 
 // The transmission that never started. The radio took the text, said where
 // it put it, and reported no progress at all — so clear it and hand it over
@@ -1130,8 +1153,20 @@ String manualIp()  { return cfgManualIp; }
 String radioIp()   { return cfgManualIp.length() ? cfgManualIp : foundIp; }
 String radioModel(){ return foundModel; }
 
-void queueText(const char* text, bool retry) {
-  if (!connected() || !text || !*text) return;
+bool queueText(const char* text, bool retry) {
+  if (!connected() || !text || !*text) return false;
+  // Never into a slice that cannot send CW. The radio takes the text anyway
+  // and reports no error — it just sits in the CWX buffer, unsent, and when
+  // the slice comes back to CW the generator is wedged behind it (Manoj's
+  // reading of 2026-09-28: 21.074 DIGU for FT8, then CW, then "cwx
+  // erase=1,9" with four characters nobody had heard queued in front).
+  // The display, the web page and /status all say why.
+  if (!sliceReady()) {
+    char w[96]; sliceWarning(w, sizeof w, WARN_SHORT);
+    ftAdd('#', "refused: slice not ready for CW");
+    Log::printf("[FLEX] not sent, %s: \"%s\"\n", w, text);
+    return false;
+  }
   String out;
   for (const char* p = text; *p; p++) out += (*p == ' ') ? (char)0x7F : *p;
   cwxSends[cwxSendNext].seq = seq;                            // seq sendCmd will use
@@ -1164,9 +1199,10 @@ void queueText(const char* text, bool retry) {
   if (queuedIdx < sentIdx) queuedIdx = sentIdx;
   queuedIdx += strlen(text);
   busyUntil = millis() + estimateMs(strlen(text)) + 5000;
+  return true;
 }
 
-void send(const char* text) { queueText(text, false); }
+bool send(const char* text) { return queueText(text, false); }
 
 void clear(const char* why) {
   if (!connected()) return;

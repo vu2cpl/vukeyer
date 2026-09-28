@@ -630,6 +630,17 @@ void handleSet() {
   server.send(ok ? 200 : 400, "text/plain", msg);
 }
 
+// On the Flex backend, say on the page why nothing will go out, instead
+// of reporting "sent" for text the radio would take and never key. Answers
+// the request itself when it refuses.
+bool radioReadyForCw() {
+  if (HostLink::getBackend() != WK_BACKEND_FLEX || Keyer::practice()) return true;
+  if (!Flex::connected() || Flex::sliceReady()) return true;
+  char w[128]; Flex::sliceWarning(w, sizeof w, Flex::WARN_LONG);
+  server.send(409, "text/plain", w);
+  return false;
+}
+
 void handleSend() {
   // One button on the page is SEND or STOP depending on what is happening,
   // so the stop arrives on this endpoint. It has to clear the radio's buffer
@@ -644,6 +655,7 @@ void handleSend() {
   }
   String t = server.arg("t");
   if (!t.length()) { server.send(400, "text/plain", "nothing to send"); return; }
+  if (!radioReadyForCw()) return;
   HostLink::sendText(t.c_str());
   Log::printf("[WEB] > %s\n", t.c_str());
   server.send(200, "text/plain", String("sent: ") + t);
@@ -657,6 +669,7 @@ void handleMem() {
   }
   if (server.hasArg("play")) {
     uint8_t n = (uint8_t)server.arg("play").toInt();
+    if (!radioReadyForCw()) return;
     bool ok = Memories::play(n);
     server.send(ok ? 200 : 400, "text/plain",
                 ok ? String("playing memory ") + n : String("memory is empty"));

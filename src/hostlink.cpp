@@ -538,7 +538,9 @@ void execImmediate(uint8_t cmd, const uint8_t* p, uint8_t n) {
 void flushFlex() {
   if (flexLen == 0) return;
   flexOut[flexLen] = '\0';
-  Flex::send(flexOut);
+  if (!Flex::send(flexOut)) {     // refused (slice not in CW): nothing will
+    echoReset(); monReset();      // be sent, echoed or heard
+  }
   flexLen = 0;
 }
 
@@ -732,9 +734,9 @@ void abort(const char* why) {
 void sendText(const char* text) {
   if (!text || !*text) return;
   if (flexOn()) {
-    Flex::send(text);                       // the radio generates the CW
-    if (monitorLocal)                       // ...and we make the sidetone
-      for (const char* p = text; *p; p++) monPush(*p);
+    if (!Flex::send(text)) return;          // refused: no CW, so no sidetone
+    if (monitorLocal)                       // the radio generates the CW,
+      for (const char* p = text; *p; p++) monPush(*p);   // we the sidetone
   } else {
     for (const char* p = text; *p; p++) Keyer::sendChar(*p);
     Keyer::sendChar(' ');

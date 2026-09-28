@@ -2227,6 +2227,35 @@ makes the keyer feel slow.
     the radio in the morning was not an AetherSDR restart by itself; the
     trigger is still unknown, and the event ring is now armed to catch it.
     Next time CW dies: read `/api/flexevents` **before** play/STOP.
+  - **Manoj's reading of the trigger, and the fix for it (evening):** *"I
+    think this issue happens when the radio is on a non-CW mode and tries
+    to TX."* It fits the morning's evidence better than anything from
+    09-17: the slice was on **21.074 DIGU** (FT8) right after the test, and
+    the `cwx erase=1,9` had four characters queued **ahead** of his "73 TU"
+    that nobody had heard — what a memory played into a DIGU slice would
+    leave behind. And the keyer really did keep keying into a non-CW slice:
+    `pumpKeying()` warned and then sent `xmit 1` and the elements anyway
+    ("keying into the void"), and `Flex::send()` had no slice check at all.
+    Now, on the Flex backend:
+    - **Keying into a slice that is not in CW is refused**, not warned
+      about. Paddle elements are dropped (a key already down is still
+      released), `Flex::send()` returns false and nothing is queued, echoed
+      or sounded, and the web page's SEND and memory PLAY answer **409**
+      with the slice warning instead of "sent". Each refusal is a `#`
+      line in both traces.
+    - **The radio's CWX buffer is flushed whenever the slice changes
+      readiness** (into or out of CW / in use), unless the radio is
+      transmitting or our key is down — so text that got in from anywhere
+      while the slice was wrong is thrown away before it can wedge the
+      generator. This also runs on connect, from the first slice snapshot.
+    - **Not done, on purpose:** switching the slice to CW ourselves. That
+      changes the operator's radio under a running FT8 session, and the
+      display / web page already say why nothing goes out.
+    Not yet flashed at the time of the commit: RUMlogNG held the USB port.
+    **Test to reproduce, once flashed:** slice in DIGU, press a memory —
+    should answer *"Radio slice is in DIGU, not CW"* and key nothing; switch
+    the slice to CW — `/api/flexevents` should show the flush; paddle
+    first — should make power.
 
 ## Network placement (measured 2026-09-10)
 
